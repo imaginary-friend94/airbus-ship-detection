@@ -15,17 +15,18 @@ from torch import nn
 from skimage.morphology import label
 from torch.utils.data import Dataset, DataLoader
 from unet_models import UNetResNet
+from deep_unet import DeepUNet
 
 
 ### CONFIG
-
-path_to_dataset = "/home/timur/Disk/Airbus_Ship_Detection_Challenge_DATA/"
+path_to_dataset = "../"
 csv_name = "train_ship_segmentations.csv"
-batch_size = 8
-num_epoch = 10
-n_epoch = 10
+batch_size = 32
+n_epoch = 5
 img_size = (256, 256)
 ###
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 path_to_img_train = os.path.join(path_to_dataset, "train")
 path_to_img_test = os.path.join(path_to_dataset, "test")
@@ -140,10 +141,11 @@ class Airbus_Dataset(Dataset):
 train_dataset = Airbus_Dataset(train_data_img, data_csv, path_to_img_train, img_size, aug=True)
 val_dataset = Airbus_Dataset(val_data_img, data_csv, path_to_img_train, img_size)
 
-train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
-val_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
+train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+val_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
-model = UNetResNet(encoder_depth=152, num_classes=2, pretrained=True).cuda()
+#model = UNetResNet(encoder_depth=152, num_classes=2, pretrained=True).cuda()
+model = DeepUNet(num_classes=2).cuda()
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.003)
 
@@ -200,7 +202,7 @@ for epoch in range(n_epoch):
     loss_train, iou_train = train(model, train_dataloader, optimizer, criterion)
     loss_val, iou_val = eval(model, val_dataloader, criterion)
     print(f"epoch {epoch}, loss train {loss_train}, iou train {iou_train}, loss val {loss_val}, iou val {iou_val}")
-    torch.save(model.state_dict(), f"./unet16_{epoch}.w")
+    torch.save(model.state_dict(), f"./deep_unet_{epoch}.w")
     
 
 model.eval()
@@ -211,7 +213,6 @@ for i in tqdm.tqdm(range(len(submission_csv))):
     image = cv2.resize(image, img_size).transpose(2, 0, 1).astype(np.float32) / 255.0
     image = image[np.newaxis, ...]
     image = torch.from_numpy(image).cuda()
-    
     output = model.forward(image)
     output = torch.argmax(output, dim=1).cpu().data.numpy()
     multi_rle = multi_rle_encode(output.squeeze())
@@ -221,5 +222,5 @@ for i in tqdm.tqdm(range(len(submission_csv))):
     else:
         pred_list.append([image_name, None])
 
-_dataframe = pd.DataFrame(pred_list, columns = ["ImageId", "EncodedPixels"], index=False)
-_dataframe.to_csv("submission.csv")
+_dataframe = pd.DataFrame(np.array(pred_list), columns = ["ImageId", "EncodedPixels"])
+_dataframe.to_csv("submission_deep_unet.csv", index=False)
